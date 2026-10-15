@@ -100,6 +100,7 @@ def resolve_connection(cli_host=None, cli_port=None):
 CLI_HOST = None
 CLI_PORT = None
 REMOTE_MODE = False
+REMOTE_RESPONSE_LIMIT = 32 * 1024 * 1024
 _connection_creation_lock = threading.Lock()
 
 _addon_handshake = None
@@ -168,7 +169,7 @@ class BlenderConnection:
                     
                     chunks.append(chunk)
                     received += len(chunk)
-                    if REMOTE_MODE and received > 32 * 1024 * 1024:
+                    if REMOTE_MODE and received > REMOTE_RESPONSE_LIMIT:
                         raise ValueError("Blender response exceeds 32 MiB; reduce image/render size")
                     
                     # Check if we've received a complete JSON object
@@ -182,6 +183,8 @@ class BlenderConnection:
                         # Incomplete JSON, continue receiving
                         continue
                 except socket.timeout:
+                    if REMOTE_MODE:
+                        raise
                     # If we hit a timeout during receiving, break the loop and try to use what we have
                     logger.warning("Socket timeout during chunked receive")
                     break
@@ -189,6 +192,8 @@ class BlenderConnection:
                     logger.error(f"Socket connection error during receive: {str(e)}")
                     raise  # Re-raise to be handled by the caller
         except socket.timeout:
+            if REMOTE_MODE:
+                raise
             logger.warning("Socket timeout during chunked receive")
         except Exception as e:
             logger.error(f"Error during receive: {str(e)}")

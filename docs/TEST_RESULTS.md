@@ -27,3 +27,16 @@ DISABLE_TELEMETRY=true .venv/bin/python -m pytest -q
 Dừng GoodMCP/cloudflared trước. Dùng stdio như cũ (`mcp-for-blender`, không có `--transport`). Để quay lại mã cũ, lưu thay đổi cá nhân, checkout SHA baseline ở trên, `uv sync --frozen`. Không reset/xóa file `.blend`; mở lại bản backup thử khi cần. Addon không bị thay đổi.
 
 Kết quả toàn suite sau PR-1: **486 passed, 1 skipped** (39.88s). Skip có sẵn được giữ nguyên.
+
+## PR-2 — Ticket C
+
+- Origin kiểm tra Access JWT RS256 với JWKS HTTPS cố định theo team, issuer, audience, exp/iat/sub/email; so khớp đúng một email. Không dùng header email hoặc bearer tự khai làm danh tính.
+- Mọi path/method HTTP đi qua auth trước dispatch. Thiếu/sai token: 401; tài khoản khác: 403; lỗi kết nối JWKS: fail closed. Không trả token hoặc stack trace.
+- Remote buộc safe mode và tắt telemetry/context log, tắt log upstream có chứa raw Python; uvicorn không trust proxy headers và không access-log.
+- Remote không chạy nếu thiếu cấu hình; `--local-test` chỉ dùng loopback, từ chối forwarding/Cloudflare headers. Không nối Tunnel vào chế độ này.
+- Chỉ đọc mặc định: `get_addon_status`, `get_scene_info`, `look`; cả `tools/list` và `tools/call` đều áp dụng allowlist. Bật `GOODMCP_ALLOW_WRITE=1` mới cho execute/import/generate/search. UI/telemetry tool không có trong remote allowlist.
+- Sửa lifecycle stateless: giữ một socket/process, không đóng kết nối dùng chung sau mỗi HTTP request; stdio giữ nguyên lifecycle cũ.
+- `pyjwt[crypto]` được khai báo trực tiếp; giữ nguyên phiên bản và checksum các dependency trong lockfile. Chỉ cập nhật metadata package gốc vốn lệch 2.1.8/2.1.9.
+- **Chưa nghiệm thu Cloudflare thật:** không có công cụ/account Cloudflare trong phiên này; Managed OAuth, email Allow policy, HTTPS, thu hồi phiên và RFC 8707 theo từng web client chưa được kiểm chứng. Không tự viết OAuth fallback khi chưa có lỗi tương thích thực tế.
+
+PR-2 toàn suite: **514 passed, 1 skipped** (41.49s); sau đó thêm test tích hợp JWT→MCP→policy, toàn file auth **25 passed** (1.46s). Blender thật qua local-test: 7 tools ở write mode; status/scene/image/write/save/concurrency đều đạt. Đây không phải JWT Cloudflare thật.
