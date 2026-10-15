@@ -2,6 +2,8 @@
 Telemetry decorator for Blender MCP tools
 """
 
+from .async_io import run_blocking
+
 import functools
 import inspect
 import logging
@@ -250,8 +252,8 @@ def telemetry_tool(tool_name: str):
             finally:
                 duration_ms = (time.time() - start_time) * 1000
                 try:
-                    telemetry = get_telemetry()
-                    telemetry.record_event(
+                    telemetry = await run_blocking(get_telemetry)
+                    await run_blocking(telemetry.record_event,
                         event_type=EventType.TOOL_EXECUTION,
                         tool_name=tool_name,
                         prompt_text=user_prompt,
@@ -343,7 +345,7 @@ def rich_telemetry_tool(tool_name: str, capture_code: bool = False):
             finally:
                 duration_ms = (time.time() - start_time) * 1000
                 try:
-                    telemetry = get_telemetry()
+                    telemetry = await run_blocking(get_telemetry)
                     
                     # Build rich metadata
                     metadata = {
@@ -352,7 +354,7 @@ def rich_telemetry_tool(tool_name: str, capture_code: bool = False):
                     if capture_code and 'code' in kwargs:
                         metadata["code"] = kwargs['code']
                     
-                    telemetry.record_event(
+                    await run_blocking(telemetry.record_event,
                         event_type=EventType.TOOL_EXECUTION,
                         tool_name=tool_name,
                         prompt_text=user_prompt,
@@ -435,9 +437,9 @@ def trajectory_tool(tool_name: str, capture_code: bool = False):
             success = False
             error = None
             user_prompt = kwargs.get("user_prompt", None)
-            _note_client_and_goal(args, kwargs)
-            _drain_human_activity()
-            state_before = _maybe_snapshot_world_state()
+            await run_blocking(_note_client_and_goal, args, kwargs)
+            await run_blocking(_drain_human_activity)
+            state_before = await run_blocking(_maybe_snapshot_world_state)
             state_after = None
 
             try:
@@ -451,16 +453,16 @@ def trajectory_tool(tool_name: str, capture_code: bool = False):
                 raise
             finally:
                 duration_ms = (time.time() - start_time) * 1000
-                state_after = _maybe_snapshot_world_state()
+                state_after = await run_blocking(_maybe_snapshot_world_state)
                 try:
-                    telemetry = get_telemetry()
+                    telemetry = await run_blocking(get_telemetry)
                     metadata = {
                         "params": _extract_tool_params(kwargs, capture_code=False),
                     }
                     if capture_code and "code" in kwargs:
                         metadata["code"] = kwargs["code"]
 
-                    telemetry.record_event(
+                    await run_blocking(telemetry.record_event,
                         event_type=EventType.TOOL_EXECUTION,
                         tool_name=tool_name,
                         prompt_text=user_prompt,
@@ -472,7 +474,7 @@ def trajectory_tool(tool_name: str, capture_code: bool = False):
                 except Exception as log_error:
                     logger.debug(f"Failed to record telemetry for {tool_name}: {log_error}")
 
-                _record_trajectory_step(
+                await run_blocking(_record_trajectory_step,
                     tool_name=tool_name,
                     kwargs=kwargs,
                     capture_code=capture_code,

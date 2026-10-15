@@ -1,4 +1,5 @@
 # blender_mcp_server.py
+from .async_io import io_registration, run_blocking
 from mcp.server.fastmcp import FastMCP, Context
 import argparse
 import socket
@@ -14,6 +15,7 @@ import sys
 import time
 import base64
 import re
+import uuid
 
 # Import telemetry
 from .telemetry import record_startup, get_telemetry, EventType
@@ -99,6 +101,10 @@ def resolve_connection(cli_host=None, cli_port=None):
 # BLENDER_HOST/BLENDER_PORT environment variables.
 CLI_HOST = None
 CLI_PORT = None
+REMOTE_MODE = False
+REMOTE_RESPONSE_TIMEOUT = 180.0
+REMOTE_RESPONSE_LIMIT = 32 * 1024 * 1024
+_connection_creation_lock = threading.Lock()
 
 _addon_handshake = None
 _addon_handshake_checked = False
@@ -121,6 +127,8 @@ class BlenderConnection:
             
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if REMOTE_MODE:
+                self.sock.settimeout(5.0)
             self.sock.connect((self.host, self.port))
             logger.info(f"Connected to Blender at {self.host}:{self.port}")
             return True
@@ -142,12 +150,20 @@ class BlenderConnection:
     def receive_full_response(self, sock, buffer_size=8192):
         """Receive the complete response, potentially in multiple chunks"""
         chunks = []
+        received = 0
+        timeout = REMOTE_RESPONSE_TIMEOUT if REMOTE_MODE else 180.0
+        deadline = time.monotonic() + timeout
         # Use a consistent timeout value that matches the addon's timeout
-        sock.settimeout(180.0)  # Match the addon's timeout
+        sock.settimeout(timeout)  # Match the addon's timeout
         
         try:
             while True:
                 try:
+                    if REMOTE_MODE:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise socket.timeout("Blender response exceeded 180 seconds")
+                        sock.settimeout(remaining)
                     chunk = sock.recv(buffer_size)
                     if not chunk:
                         # If we get an empty chunk, the connection might be closed
@@ -156,6 +172,9 @@ class BlenderConnection:
                         break
                     
                     chunks.append(chunk)
+                    received += len(chunk)
+                    if REMOTE_MODE and received > REMOTE_RESPONSE_LIMIT:
+                        raise ValueError("Blender response exceeds 32 MiB; reduce image/render size")
                     
                     # Check if we've received a complete JSON object
                     try:
@@ -164,10 +183,12 @@ class BlenderConnection:
                         # If we get here, it parsed successfully
                         logger.info(f"Received complete response ({len(data)} bytes)")
                         return data
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         # Incomplete JSON, continue receiving
                         continue
                 except socket.timeout:
+                    if REMOTE_MODE:
+                        raise
                     # If we hit a timeout during receiving, break the loop and try to use what we have
                     logger.warning("Socket timeout during chunked receive")
                     break
@@ -175,6 +196,8 @@ class BlenderConnection:
                     logger.error(f"Socket connection error during receive: {str(e)}")
                     raise  # Re-raise to be handled by the caller
         except socket.timeout:
+            if REMOTE_MODE:
+                raise
             logger.warning("Socket timeout during chunked receive")
         except Exception as e:
             logger.error(f"Error during receive: {str(e)}")
@@ -248,11 +271,11 @@ class BlenderConnection:
             logger.error("Socket timeout while waiting for response from Blender")
             # Don't try to reconnect here - let the get_blender_connection handle reconnection
             # Just invalidate the current socket so it will be recreated next time
-            self.sock = None
+            self.disconnect()
             raise Exception("Timeout waiting for Blender response - try simplifying your request. If Blender is running headless (blender -b), commands never execute; run Blender with a GUI or via 'xvfb-run -a blender' instead")
         except (ConnectionError, BrokenPipeError, ConnectionResetError) as e:
             logger.error(f"Socket connection error: {str(e)}")
-            self.sock = None
+            self.disconnect()
             raise Exception(f"Connection to Blender lost: {str(e)}")
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON response from Blender: {str(e)}")
@@ -263,7 +286,7 @@ class BlenderConnection:
         except Exception as e:
             logger.error(f"Error communicating with Blender: {str(e)}")
             # Don't try to reconnect here - let the get_blender_connection handle reconnection
-            self.sock = None
+            self.disconnect()
             raise Exception(f"Communication error with Blender: {str(e)}")
 
 @asynccontextmanager
@@ -287,14 +310,14 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
 
         # Record startup event for telemetry
         try:
-            record_startup()
+            await run_blocking(record_startup)
         except Exception as e:
             logger.debug(f"Failed to record startup telemetry: {e}")
 
         # Try to connect to Blender on startup to verify it's available
         try:
             # This will initialize the global connection if needed
-            blender = get_blender_connection()
+            blender = await run_blocking(get_blender_connection)
             logger.info("Successfully connected to Blender on startup")
             if _addon_handshake and not _addon_handshake.up_to_date:
                 logger.warning(format_handshake_log(_addon_handshake))
@@ -314,12 +337,18 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
         except Exception as e:
             logger.debug(f"Episode close on shutdown skipped: {e}")
         # Clean up the global connection on shutdown
-        global _blender_connection
-        if _blender_connection:
-            logger.info("Disconnecting from Blender on shutdown")
-            _blender_connection.disconnect()
-            _blender_connection = None
+        await run_blocking(_close_blender_connection)
         logger.info("BlenderMCP server shut down")
+
+
+def _close_blender_connection():
+    global _blender_connection
+    with _connection_creation_lock:
+        if _blender_connection:
+            # A cancelled HTTP request may still be draining its response.
+            with _blender_connection._lock:
+                _blender_connection.disconnect()
+            _blender_connection = None
 
 # Guidance delivered to clients in the `initialize` response. This is the only
 # guidance every client is sure to get: MCP prompts are user-invoked, and the
@@ -401,6 +430,11 @@ def _addon_protocol() -> int | None:
 
 
 def get_blender_connection():
+    with _connection_creation_lock:
+        return _get_blender_connection_locked()
+
+
+def _get_blender_connection_locked():
     """Get or create a persistent Blender connection"""
     global _blender_connection
 
@@ -463,14 +497,22 @@ async def get_addon_status(ctx: Context, user_prompt: str = "") -> str:
     Blender could not be reached. Use it to answer telemetry status questions.
     """
     try:
-        blender = get_blender_connection()
+        blender = await run_blocking(get_blender_connection)
         global _addon_handshake, _addon_handshake_checked
         with _addon_handshake_lock:
             _addon_handshake_checked = False
-        _maybe_handshake_addon(blender)
+        await run_blocking(_maybe_handshake_addon, blender)
         result = _addon_handshake
         if result is None:
             return "Could not determine addon status." + await maybe_prompt_for_consent(ctx)
+        # Telemetry is optional; source checkouts may omit its private config.
+        # An unavailable collector must not make Blender status unavailable.
+        try:
+            telemetry_consent = await run_blocking(lambda: get_telemetry().check_user_consent())
+        except ModuleNotFoundError as exc:
+            if exc.name != "blender_mcp.config":
+                raise
+            telemetry_consent = None
         payload = {
             "up_to_date": result.up_to_date,
             "protocol_version": result.protocol_version,
@@ -479,10 +521,10 @@ async def get_addon_status(ctx: Context, user_prompt: str = "") -> str:
             "capabilities": result.capabilities,
             "blender_version": result.blender_version,
             "premium_generators": result.premium_generators,
-            **_integrations(blender, result.premium_generators),
+            **(await run_blocking(_integrations, blender, result.premium_generators)),
             "source": result.source,
             "warning": result.warning,
-            "telemetry_consent": get_telemetry().check_user_consent(),
+            "telemetry_consent": telemetry_consent,
             "update_command": "uvx mcp-for-blender install-addon",
             "after_install": (
                 "If the addon file was updated: in Blender, Preferences → Add-ons → "
@@ -495,7 +537,7 @@ async def get_addon_status(ctx: Context, user_prompt: str = "") -> str:
         return f"Error checking addon status: {e}"
 
 
-@mcp.tool()
+@io_registration(mcp.tool)
 def disable_telemetry(ctx: Context, user_prompt: str = "") -> str:
     """
     Turn OFF collection of prompts, code, screenshots and scene data.
@@ -645,13 +687,13 @@ async def get_scene_info(
     data = None
     try:
         try:
-            data = _run_script(blender_scripts.SCENE_SUMMARY,
+            data = await run_blocking(_run_script, blender_scripts.SCENE_SUMMARY,
                                {"query": query, "root": root, "limit": limit, "fields": fields})
         except Exception as e:
             # Very old addons, or a Blender that can't run the script: the
             # addon's own summary still says what's there.
             logger.debug(f"Scene summary script failed, using get_scene_info: {e}")
-            result = get_blender_connection().send_command("get_scene_info")
+            result = await run_blocking(lambda: get_blender_connection().send_command("get_scene_info"))
             success = True
             return json.dumps(result, indent=2)
         if data.get("error"):
@@ -666,7 +708,7 @@ async def get_scene_info(
     finally:
         try:
             from .telemetry_decorator import _record_observe_step
-            _record_observe_step(
+            await run_blocking(_record_observe_step,
                 "get_scene_info",
                 modality="scene_info",
                 goal_text=user_prompt,
@@ -687,7 +729,7 @@ def _capture_viewport(max_size: int) -> tuple[bytes, dict]:
     file and scene it shows.
     """
     blender = get_blender_connection()
-    temp_path = os.path.join(tempfile.gettempdir(), f"blender_screenshot_{os.getpid()}.png")
+    temp_path = os.path.join(tempfile.gettempdir(), f"blender_screenshot_{uuid.uuid4().hex}.png")
 
     result = blender.send_command("get_viewport_screenshot", {
         "max_size": max_size,
@@ -814,8 +856,8 @@ async def execute_blender_code(ctx: Context, code: str, user_prompt: str = "") -
             )
     try:
         # Get the global connection
-        blender = get_blender_connection()
-        result = blender.send_command("execute_code", {"code": code})
+        blender = await run_blocking(get_blender_connection)
+        result = await run_blocking(blender.send_command, "execute_code", {"code": code})
         return f"Code executed successfully: {result.get('result', '')}"
     except Exception as e:
         logger.error(f"Error executing code: {str(e)}")
@@ -895,8 +937,8 @@ async def _search_polyhaven(
 ) -> str:
     """search_assets(source="polyhaven"): ranked Poly Haven results, with real-world sizes and the picker."""
     try:
-        blender = get_blender_connection()
-        result = blender.send_command("search_polyhaven_assets", {
+        blender = await run_blocking(get_blender_connection)
+        result = await run_blocking(blender.send_command, "search_polyhaven_assets", {
             "asset_type": asset_type,
             "category": category,
             "attributes": attributes,
@@ -986,8 +1028,8 @@ async def _download_polyhaven(
 ) -> str:
     """import_asset(source="polyhaven"): download an HDRI, texture or model and say where it came from."""
     try:
-        blender = get_blender_connection()
-        result = blender.send_command("download_polyhaven_asset", {
+        blender = await run_blocking(get_blender_connection)
+        result = await run_blocking(blender.send_command, "download_polyhaven_asset", {
             "asset_id": asset_id,
             "asset_type": asset_type,
             "resolution": resolution,
@@ -1032,8 +1074,8 @@ async def _set_texture(
     """Apply a downloaded Poly Haven texture to an object, replacing its materials (import_asset's apply_to)."""
     try:
         # Get the global connection
-        blender = get_blender_connection()
-        result = blender.send_command("set_texture", {
+        blender = await run_blocking(get_blender_connection)
+        result = await run_blocking(blender.send_command, "set_texture", {
             "object_name": object_name,
             "texture_id": texture_id
         })
@@ -1097,9 +1139,9 @@ async def _search_sketchfab(
     downloadable: bool = True, user_prompt: str = "") -> str:
     """search_assets(source="sketchfab"): matching models with author, licence and face count."""
     try:
-        blender = get_blender_connection()
+        blender = await run_blocking(get_blender_connection)
         logger.info(f"Searching Sketchfab models with query: {query}, categories: {categories}, count: {count}, downloadable: {downloadable}")
-        result = blender.send_command("search_sketchfab_models", {
+        result = await run_blocking(blender.send_command, "search_sketchfab_models", {
             "query": query,
             "categories": categories,
             "count": count,
@@ -1172,10 +1214,10 @@ async def _download_sketchfab(
     target_size: float, user_prompt: str = "") -> str:
     """import_asset(source="sketchfab"): import a model scaled so its largest side is target_size."""
     try:
-        blender = get_blender_connection()
+        blender = await run_blocking(get_blender_connection)
         logger.info(f"Downloading Sketchfab model: {uid}, target_size={target_size}")
         
-        result = blender.send_command("download_sketchfab_model", {
+        result = await run_blocking(blender.send_command, "download_sketchfab_model", {
             "uid": uid,
             "normalize_size": True,  # Always normalize
             "target_size": target_size
@@ -1327,12 +1369,12 @@ async def _search_polypizza(
                 "(category, licence, or animated=True)."
             )
 
-        blender = get_blender_connection()
+        blender = await run_blocking(get_blender_connection)
         logger.info(
             f"Searching Poly Pizza models with query: {query}, category: {category}, "
             f"licence: {licence}, animated: {animated}, limit: {limit}"
         )
-        result = blender.send_command("search_polypizza_models", {
+        result = await run_blocking(blender.send_command, "search_polypizza_models", {
             "query": query,
             "category": category_id,
             "licence": licence_id,
@@ -1408,13 +1450,13 @@ async def _download_polypizza(
     target_size: float = 1.0, user_prompt: str = "") -> str:
     """import_asset(source="polypizza"): import a model and record its attribution on it."""
     try:
-        blender = get_blender_connection()
+        blender = await run_blocking(get_blender_connection)
         logger.info(
             f"Downloading Poly Pizza model: {model_id}, normalize_size={normalize_size}, "
             f"target_size={target_size}"
         )
 
-        result = blender.send_command("download_polypizza_model", {
+        result = await run_blocking(blender.send_command, "download_polypizza_model", {
             "model_id": model_id,
             "normalize_size": normalize_size,
             "target_size": target_size
@@ -1478,7 +1520,7 @@ TRIPO_UNAVAILABLE = generation.TRIPO_UNAVAILABLE
 
 
 
-@mcp.tool()
+@io_registration(mcp.tool)
 def record_trajectory_feedback(
     ctx: Context,
     feedback: str,
@@ -1628,7 +1670,7 @@ async def look(
     # Each falls back to the other, since old addons may have only one of them.
     first, second = (native, scripted) if mode == "viewport" and not shading else (scripted, native)
     try:
-        return first()
+        return await run_blocking(first)
     except _LookRefused as e:
         return _app_error(str(e))
     except Exception as e:
@@ -1638,7 +1680,7 @@ async def look(
         hint = f" {ADDON_UPDATE_HINT}" if _addon_outdated() and ADDON_UPDATE_HINT not in reason else ""
         return _app_error(f"Couldn't show the image: {reason}{hint}")
     try:
-        result = second()
+        result = await run_blocking(second)
     except Exception as e:
         hint = f" {ADDON_UPDATE_HINT}" if _addon_outdated() and ADDON_UPDATE_HINT not in reason else ""
         return _app_error(f"Couldn't capture the view: {reason}{hint}")
@@ -1653,7 +1695,7 @@ class _LookRefused(Exception):
 
 
 def _look_via_script(args: dict) -> CallToolResult:
-    path = os.path.join(tempfile.gettempdir(), f"blender_look_{os.getpid()}.png")
+    path = os.path.join(tempfile.gettempdir(), f"blender_look_{uuid.uuid4().hex}.png")
     info = _run_script(blender_scripts.LOOK, {**args, "filepath": path})
     if info.get("error"):
         raise _LookRefused(info["error"])
@@ -1699,7 +1741,7 @@ async def _generation_reply(ctx: Context, job: "generation.Job", wait_seconds: f
         return f"Still generating ({detail}). {job.resume_hint}{note}"
     reply = f"Generated and imported '{job.name}' with {job.provider}."
     try:
-        bounds = _run_script(blender_scripts.BOUNDS, {"names": [job.name]})
+        bounds = await run_blocking(_run_script, blender_scripts.BOUNDS, {"names": [job.name]})
     except Exception:
         bounds = []
     for b in bounds:
@@ -1758,10 +1800,10 @@ async def generate_3d(
             return await _generation_reply(ctx, generation.Job.parse(job, name or "Generated"), wait_seconds)
         if bool(prompt) == bool(image):
             return "Error: give exactly one of prompt or image."
-        blender = get_blender_connection()
-        premium = _premium_generators(blender)
+        blender = await run_blocking(get_blender_connection)
+        premium = await run_blocking(_premium_generators, blender)
         chosen, is_premium = generation.choose_provider(
-            provider, premium, {} if premium else _own_key_generators(blender))
+            provider, premium, {} if premium else await run_blocking(_own_key_generators, blender))
         note = "" if is_premium else premium_hint_once(ctx, {"mode": None})
         pending = _pending_generations()
         key = generation.request_key(chosen, prompt, image, quality, bbox_condition)
@@ -1770,7 +1812,7 @@ async def generate_3d(
             note = (" This request was already generating from an earlier call, so it resumed that "
                     "generation instead of starting a new one." + note)
         else:
-            started = generation.submit(
+            started = await run_blocking(generation.submit,
                 _generation_send, chosen, name or generation.default_name(prompt), prompt, image, quality,
                 bbox_condition, supports_quality=(_addon_protocol() or 0) >= 11)
             if isinstance(started, str):
@@ -1878,7 +1920,7 @@ async def search_assets(
         return _unavailable(source, e, "search")
     if listing.lower().startswith("error") and _addon_lacks(listing):
         return _unavailable(source, Exception(listing), "search")
-    images = _preview_images(source, listing, max(0, min(int(previews or 0), 6)))
+    images = await run_blocking(_preview_images, source, listing, max(0, min(int(previews or 0), 6)))
     if not images:
         return listing
     return CallToolResult(content=[TextContent(type="text", text=listing), *images])
@@ -1997,7 +2039,7 @@ def _scene_item_uri(kind: str, name: str) -> str:
 async def search_mentions(query: str = "") -> CallToolResult:
     """Search scene objects, materials and collections to @-mention in the composer."""
     try:
-        items = _scene_items(query)
+        items = await run_blocking(_scene_items, query)
     except Exception as e:
         logger.debug(f"Mention search failed: {e}")
         items = []
@@ -2016,7 +2058,7 @@ async def search_mentions(query: str = "") -> CallToolResult:
     return CallToolResult(content=[], structuredContent={"items": links})
 
 
-@mcp.resource("blender://object/{name}", mime_type="application/json")
+@io_registration(mcp.resource, "blender://object/{name}", mime_type="application/json")
 def object_resource(name: str) -> str:
     """A Blender object's transform, materials and mesh stats."""
     return json.dumps(get_blender_connection().send_command("get_object_info", {"name": unquote(name)}))
@@ -2030,19 +2072,19 @@ def _scene_item_resource(kind: str, name: str) -> str:
     raise ValueError(f"No {kind} named {name!r} in the open Blender file")
 
 
-@mcp.resource("blender://material/{name}", mime_type="application/json")
+@io_registration(mcp.resource, "blender://material/{name}", mime_type="application/json")
 def material_resource(name: str) -> str:
     """A Blender material and the objects that use it."""
     return _scene_item_resource("material", name)
 
 
-@mcp.resource("blender://collection/{name}", mime_type="application/json")
+@io_registration(mcp.resource, "blender://collection/{name}", mime_type="application/json")
 def collection_resource(name: str) -> str:
     """A Blender collection and how many objects it holds."""
     return _scene_item_resource("collection", name)
 
 
-@mcp.resource(
+@io_registration(mcp.resource,
     VIEWPORT_URI,
     name="viewport",
     title=VIEWPORT_TITLE,
@@ -2079,7 +2121,7 @@ def _viewport_result(since: int) -> CallToolResult:
     return CallToolResult(content=content, structuredContent=state)
 
 
-@mcp.tool(
+@io_registration(mcp.tool,
     title=VIEWPORT_TITLE,
     annotations=_READ_ONLY,
     icons=[viewport_icon()],
@@ -2093,13 +2135,13 @@ def open_viewport() -> CallToolResult:
     return _viewport_result(since=0)
 
 
-@mcp.tool(annotations=_READ_ONLY, meta=_APP_ONLY)
+@io_registration(mcp.tool, annotations=_READ_ONLY, meta=_APP_ONLY)
 def viewport_latest(since: int = 0) -> CallToolResult:
     """The latest viewport screenshot, if newer than `since`. Never touches Blender."""
     return _viewport_result(since)
 
 
-@mcp.tool(meta=_APP_ONLY)
+@io_registration(mcp.tool, meta=_APP_ONLY)
 def viewport_capture(max_size: int = 1000, auto: bool = False) -> CallToolResult:
     """Capture a fresh viewport screenshot for the Viewport app.
 
@@ -2117,7 +2159,7 @@ def _app_error(text: str) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=text)], isError=True)
 
 
-@mcp.tool(annotations=_READ_ONLY, meta=_APP_ONLY)
+@io_registration(mcp.tool, annotations=_READ_ONLY, meta=_APP_ONLY)
 def viewport_pick(seq: int, x: float, y: float) -> CallToolResult:
     """The object under a click on viewport capture `seq`.
 
@@ -2192,14 +2234,17 @@ mcp._mcp_server.list_tools()(_list_tools_for_client)
 
 def main():
     """Run the MCP server, or addon install CLI subcommands."""
-    global CLI_HOST, CLI_PORT
+    global CLI_HOST, CLI_PORT, REMOTE_MODE
 
     if len(sys.argv) > 1 and sys.argv[1] in {"install-addon", "addon-paths", "setup", "update", "-h", "--help"}:
         code = run_addon_cli(sys.argv[1:])
         if code >= 0:
             raise SystemExit(code)
 
-    CLI_HOST, CLI_PORT = parse_connection_args(sys.argv[1:])
+    from .remote import parse_transport_args, run_http
+    transport_args, connection_args = parse_transport_args(sys.argv[1:])
+    REMOTE_MODE = transport_args.transport == "streamable-http"
+    CLI_HOST, CLI_PORT = parse_connection_args(connection_args)
 
     # When run by hand (stdin is a TTY) the server appears to "hang" while it
     # silently waits for an MCP client; log a hint so that state is obvious.
@@ -2219,7 +2264,10 @@ def main():
             "(if the addon is outdated this logs how to update it: uvx mcp-for-blender install-addon)"
         )
     context_log.install(mcp, SERVER_INSTRUCTIONS)
-    mcp.run()
+    if transport_args.transport == "stdio":
+        mcp.run()
+    else:
+        run_http(mcp, transport_args)
 
 if __name__ == "__main__":
     main()
