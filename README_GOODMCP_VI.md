@@ -128,6 +128,10 @@ npx @modelcontextprotocol/inspector@1.0.2 --cli http://127.0.0.1:8765/mcp --tran
 
 Chạy `initialize`, `tools/list`, `get_addon_status`, `get_scene_info`, `look`. Chỉ sau khi Access đúng và bản backup có thể mở lại, đổi `GOODMCP_ALLOW_WRITE=1` trong `.env`, Stop/Start để áp dụng. Tạo `GoodMCP_Test_Cube`, đổi màu và lưu vào **file thử riêng**. Không ghi đè scene thật. Safe mode là bộ lọc AST, **không cách ly filesystem**: `bpy` vẫn có thể save/import/export. Tool execute được cấp khả năng chỉnh Blender mạnh; chỉ bật khi cần.
 
+Trong remote chỉ đọc, `look(image=...)` chỉ nhận tên ảnh đã có trong Blender, gồm `Render Result`; tên không có trong datablock bị từ chối trước khi đọc đĩa. Ảnh đã liên kết với Blender vẫn thuộc phạm vi được xem. Muốn đọc ảnh từ đường dẫn file, phải bật rõ ràng `GOODMCP_ALLOW_WRITE=1`; stdio giữ hành vi cũ.
+
+Remote resources chỉ gồm HTML viewport đi kèm và dữ liệu object/material/collection trong scene. Các URI khác bị chặn ở cả discovery và thực thi `resources/read`.
+
 Giữ 3 phép nghiệm thu độc lập cho mỗi nền tảng:
 
 | Client | Protocol works | Account/region eligible | Read/write usable |

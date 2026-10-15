@@ -145,3 +145,10 @@ Real stdio private test-file image access unchanged: PASS
 ```
 
 `Render Result` được tạo bằng render thử 64x64 trên scene thử và khôi phục engine/resolution sau khi chuẩn bị. HTTP test chỉ dùng loopback, không có Tunnel. Gate triển khai Cloudflare/Windows/web AI thật vẫn chưa được nghiệm thu; kết quả này không xác nhận end-to-end OAuth.
+
+### Kết quả CI và nhánh phụ thuộc sau review PR-2
+
+- PR-2 `bcc61dd`: **539 passed, 1 skipped**; GitHub Actions **SUCCESS** cho đúng SHA: https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697066804 và https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697061180.
+- Các file của fix: `src/blender_mcp/remote_policy.py`, `src/blender_mcp/server.py`, `src/blender_mcp/blender_scripts.py`, `tests/test_remote_image_policy.py`, `.env.example`, `docs/TEST_RESULTS.md`.
+- Lệnh chính: `.venv/bin/python -m compileall -q src/blender_mcp/remote_policy.py src/blender_mcp/server.py src/blender_mcp/blender_scripts.py`; `.venv/bin/python -m pytest tests/test_access_auth.py tests/test_remote_image_policy.py tests/test_consolidated_tools.py tests/test_remote_protocol.py -q`; `DISABLE_TELEMETRY=true .venv/bin/python -m pytest -q`; `git diff --check`.
+- Đã merge bản sửa vào nhánh PR-3, giữ cấu hình startup/auth/logging hiện có. Frozen install + toàn suite trên nhánh kết hợp: **559 passed, 1 skipped** (53.05s). README bổ sung phạm vi ảnh/resources; không merge PR nào vào `main`.
