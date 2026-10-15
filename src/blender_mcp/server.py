@@ -99,6 +99,8 @@ def resolve_connection(cli_host=None, cli_port=None):
 # BLENDER_HOST/BLENDER_PORT environment variables.
 CLI_HOST = None
 CLI_PORT = None
+REMOTE_MODE = False
+_connection_creation_lock = threading.Lock()
 
 _addon_handshake = None
 _addon_handshake_checked = False
@@ -121,6 +123,8 @@ class BlenderConnection:
             
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if REMOTE_MODE:
+                self.sock.settimeout(5.0)
             self.sock.connect((self.host, self.port))
             logger.info(f"Connected to Blender at {self.host}:{self.port}")
             return True
@@ -142,12 +146,19 @@ class BlenderConnection:
     def receive_full_response(self, sock, buffer_size=8192):
         """Receive the complete response, potentially in multiple chunks"""
         chunks = []
+        received = 0
+        deadline = time.monotonic() + 180.0
         # Use a consistent timeout value that matches the addon's timeout
         sock.settimeout(180.0)  # Match the addon's timeout
         
         try:
             while True:
                 try:
+                    if REMOTE_MODE:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise socket.timeout("Blender response exceeded 180 seconds")
+                        sock.settimeout(remaining)
                     chunk = sock.recv(buffer_size)
                     if not chunk:
                         # If we get an empty chunk, the connection might be closed
@@ -156,6 +167,9 @@ class BlenderConnection:
                         break
                     
                     chunks.append(chunk)
+                    received += len(chunk)
+                    if REMOTE_MODE and received > 32 * 1024 * 1024:
+                        raise ValueError("Blender response exceeds 32 MiB; reduce image/render size")
                     
                     # Check if we've received a complete JSON object
                     try:
@@ -164,7 +178,7 @@ class BlenderConnection:
                         # If we get here, it parsed successfully
                         logger.info(f"Received complete response ({len(data)} bytes)")
                         return data
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         # Incomplete JSON, continue receiving
                         continue
                 except socket.timeout:
@@ -401,6 +415,11 @@ def _addon_protocol() -> int | None:
 
 
 def get_blender_connection():
+    with _connection_creation_lock:
+        return _get_blender_connection_locked()
+
+
+def _get_blender_connection_locked():
     """Get or create a persistent Blender connection"""
     global _blender_connection
 
@@ -471,6 +490,14 @@ async def get_addon_status(ctx: Context, user_prompt: str = "") -> str:
         result = _addon_handshake
         if result is None:
             return "Could not determine addon status." + await maybe_prompt_for_consent(ctx)
+        # Telemetry is optional; source checkouts may omit its private config.
+        # An unavailable collector must not make Blender status unavailable.
+        try:
+            telemetry_consent = get_telemetry().check_user_consent()
+        except ModuleNotFoundError as exc:
+            if exc.name != "blender_mcp.config":
+                raise
+            telemetry_consent = None
         payload = {
             "up_to_date": result.up_to_date,
             "protocol_version": result.protocol_version,
@@ -482,7 +509,7 @@ async def get_addon_status(ctx: Context, user_prompt: str = "") -> str:
             **_integrations(blender, result.premium_generators),
             "source": result.source,
             "warning": result.warning,
-            "telemetry_consent": get_telemetry().check_user_consent(),
+            "telemetry_consent": telemetry_consent,
             "update_command": "uvx mcp-for-blender install-addon",
             "after_install": (
                 "If the addon file was updated: in Blender, Preferences → Add-ons → "
@@ -2192,14 +2219,17 @@ mcp._mcp_server.list_tools()(_list_tools_for_client)
 
 def main():
     """Run the MCP server, or addon install CLI subcommands."""
-    global CLI_HOST, CLI_PORT
+    global CLI_HOST, CLI_PORT, REMOTE_MODE
 
     if len(sys.argv) > 1 and sys.argv[1] in {"install-addon", "addon-paths", "setup", "update", "-h", "--help"}:
         code = run_addon_cli(sys.argv[1:])
         if code >= 0:
             raise SystemExit(code)
 
-    CLI_HOST, CLI_PORT = parse_connection_args(sys.argv[1:])
+    from .remote import parse_transport_args, run_http
+    transport_args, connection_args = parse_transport_args(sys.argv[1:])
+    REMOTE_MODE = transport_args.transport == "streamable-http"
+    CLI_HOST, CLI_PORT = parse_connection_args(connection_args)
 
     # When run by hand (stdin is a TTY) the server appears to "hang" while it
     # silently waits for an MCP client; log a hint so that state is obvious.
@@ -2219,7 +2249,10 @@ def main():
             "(if the addon is outdated this logs how to update it: uvx mcp-for-blender install-addon)"
         )
     context_log.install(mcp, SERVER_INSTRUCTIONS)
-    mcp.run()
+    if transport_args.transport == "stdio":
+        mcp.run()
+    else:
+        run_http(mcp, transport_args)
 
 if __name__ == "__main__":
     main()
