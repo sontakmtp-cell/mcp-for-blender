@@ -1695,8 +1695,11 @@ class _LookRefused(Exception):
 
 
 def _look_via_script(args: dict) -> CallToolResult:
+    from .remote_policy import disk_images_allowed
     path = os.path.join(tempfile.gettempdir(), f"blender_look_{uuid.uuid4().hex}.png")
-    info = _run_script(blender_scripts.LOOK, {**args, "filepath": path})
+    info = _run_script(blender_scripts.LOOK, {
+        **args, "filepath": path, "allow_disk_images": disk_images_allowed.get(),
+    })
     if info.get("error"):
         raise _LookRefused(info["error"])
     with open(path, "rb") as f:
