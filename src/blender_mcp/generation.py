@@ -9,6 +9,8 @@ The addon still does the provider work (and the Premium routing), through the
 commands it has always had, so this needs no addon update.
 """
 
+from .async_io import run_blocking
+
 import asyncio
 import base64
 import hashlib
@@ -321,9 +323,9 @@ async def wait_and_import(send: Send, job: Job, wait_seconds: float,
     start = clock()
     while True:
         try:
-            state, detail = poll(send, job)
+            state, detail = await run_blocking(poll, send, job)
             if state == "done":
-                import_result(send, job, detail)
+                await run_blocking(import_result, send, job, detail)
         except Unsupported:
             raise
         except Exception as e:
