@@ -83,3 +83,7 @@ Write test dùng `bpy` tạo `GoodMCP_Inspector_Test`, vật liệu Principled m
 Bộ kiểm tra tự động còn xác minh request >1 MiB nhận 413, Host lạ nhận 421, malformed Tunnel config bị từ chối. Diff addon gốc/bundled rỗng; mọi package dependency, version và artifact checksum ngoài metadata package gốc giữ nguyên baseline.
 
 Kết quả cuối PR-3: **535 passed, 1 skipped** (42.28s), `git diff --check` đạt. Skip có sẵn từ baseline, không vô hiệu test. Toàn bộ mã mới có regression tests; thay đổi addon bằng 0. HTTP local-test đã dừng sau nghiệm thu; Blender thử vẫn ở loopback. Chưa mở public endpoint hoặc merge bất kỳ nhánh nào vào main.
+
+### Trạng thái review
+
+Đã mở và xác minh ba Draft PR: [#1](https://github.com/sontakmtp-cell/mcp-for-blender/pull/1), [#2](https://github.com/sontakmtp-cell/mcp-for-blender/pull/2), [#3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3). Base/head nối tiếp đúng kế hoạch, chưa merge. Quyền repository hiện có đủ tạo PR dù `/user` ban đầu bị từ chối. Các gate bên ngoài chưa thay đổi trạng thái.
