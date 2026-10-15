@@ -1,15 +1,16 @@
-# Review ba PR GoodMCP
+# GoodMCP — tình trạng review và nhánh GitHub
 
-Theo chỉ dẫn bổ sung của chủ sở hữu: dùng repository `sontakmtp-cell/mcp-for-blender` hiện tại, **không fork**, máy đích **Windows**. Kế hoạch gốc vẫn được lưu nguyên để đối chiếu; chỉ dẫn mới này thay bước fork. Email Access cấu hình ngoài Git.
+Cập nhật **2026-10-15**. Repository sử dụng: `sontakmtp-cell/mcp-for-blender`; máy đích **Windows**. Mọi thông tin đăng nhập, Cloudflare credential và email chủ sở hữu đều nằm ngoài Git.
 
-Ba Draft PR đã mở, được xác minh trạng thái OPEN và base/head qua GitHub API. Các nhánh nối tiếp để mỗi diff chỉ gồm giai đoạn tương ứng; chưa merge vào `main`.
-
-| PR | Base | Head | Nội dung review |
+| PR | Trạng thái | Đích/đầu ra thực tế | Nội dung |
 |---|---|---|---|
-| [#1](https://github.com/sontakmtp-cell/mcp-for-blender/pull/1) | `main` | `feat/goodmcp-remote` | [PR1](pr/PR1.md), Ticket A/B |
-| [#2](https://github.com/sontakmtp-cell/mcp-for-blender/pull/2) | `feat/goodmcp-remote` | `feat/goodmcp-access` | [PR2](pr/PR2.md), Ticket C |
-| [#3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3) | `feat/goodmcp-access` | `feat/goodmcp-operations` | [PR3](pr/PR3.md), Ticket D–F |
+| [#1](https://github.com/sontakmtp-cell/mcp-for-blender/pull/1) | Đã merge | `main`, merge SHA `aa8074e` | Streamable HTTP, vẫn giữ stdio; [chi tiết](pr/PR1.md) |
+| [#2](https://github.com/sontakmtp-cell/mcp-for-blender/pull/2) | Đã merge vào nhánh phụ | `feat/goodmcp-remote`, merge SHA `fdd44b8` | Cloudflare Access JWT, phân quyền remote, các test bảo mật; [chi tiết](pr/PR2.md) |
+| [#4](https://github.com/sontakmtp-cell/mcp-for-blender/pull/4) | **Đã merge vào main** | `main`, merge SHA `6b429b0` | PR tích hợp riêng 15 file từ PR2 để sửa sai đích merge |
+| [#3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3) | **OPEN / Draft**, chưa merge | Base đã đổi về `main`; head `feat/goodmcp-operations` | Launcher Windows, Tunnel, tài liệu và nghiệm thu; [chi tiết](pr/PR3.md) |
 
-Phép kiểm tra `/user` ban đầu trả Forbidden; thao tác tạo/đọc PR trong repository bằng binding GitHub hiện có vẫn thành công. Không cần fork, token mới hoặc người dùng tạo PR thủ công.
+Sau khi merge PR4, so sánh `main...feat/goodmcp-operations` còn **17 file** thuộc giai đoạn PR3; mã của PR2 (`access.py`, `remote_policy.py`) đã ở `main`. Không merge PR3 nếu CI sau cập nhật không xanh hoặc diff phát sinh nội dung ngoài phạm vi.
 
-Sau khi merge một PR, đổi base của PR kế tiếp về `main` nếu GitHub chưa tự đổi, kiểm tra lại diff và chạy regression trước merge. Giữ PR-2/3 ở draft khi các gate Cloudflare thật còn chưa nghiệm thu. Không nối Internet từ riêng nhánh PR-1. Xem [kết quả test và blocker](TEST_RESULTS.md).
+**CI có bằng chứng:** PR1 [492 passed / 1 skipped](https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224302); PR2 [539 passed / 1 skipped](https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697066804); PR3 tại SHA `3bf5822` [559 passed / 1 skipped](https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697398048). Những số 486, 514, 535 trong [lịch sử test](TEST_RESULTS.md) là lần chạy **trước khi cập nhật** chứ không phải báo cáo CI cuối cùng.
+
+**Chưa triển khai public:** Cloudflare Access policy, Managed OAuth trên tài khoản thật, Windows desktop, HTTPS/Tunnel và kết nối ChatGPT/Gemini/Grok Web chưa có kết quả E2E. Không bật Tunnel hoặc chuyển PR3 thành công bố production-ready chỉ vì kiểm thử local xanh.
