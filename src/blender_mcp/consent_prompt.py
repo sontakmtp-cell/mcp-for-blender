@@ -16,6 +16,8 @@ so it is not re-asked on every future conversation.
 """
 from __future__ import annotations
 
+from .async_io import run_blocking
+
 import json
 import logging
 import os
@@ -181,7 +183,7 @@ async def maybe_prompt_for_consent(ctx: Any) -> str:
             return ""
 
         # Already opted in via the checkbox -- nothing to ask.
-        consent = _current_consent()
+        consent = await run_blocking(_current_consent)
         if consent is None or consent:
             return ""
 
@@ -202,7 +204,7 @@ async def maybe_prompt_for_consent(ctx: Any) -> str:
             granted = (result.content or {}).get("consent") is True
             # Record how the answer arrived, so an opt-in can be audited later.
             _write_state(action="accept", consent=granted, via="elicitation")
-            if granted and _apply_consent(True):
+            if granted and await run_blocking(_apply_consent, True):
                 return (
                     "\n\n---\n"
                     "Data collection is now ON. You can turn it off any time in "
