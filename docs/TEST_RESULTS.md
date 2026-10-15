@@ -114,3 +114,9 @@ Kết quả cuối PR-3: **535 passed, 1 skipped** (42.28s), `git diff --check` 
 ### Trạng thái review
 
 Đã mở và xác minh ba Draft PR: [#1](https://github.com/sontakmtp-cell/mcp-for-blender/pull/1), [#2](https://github.com/sontakmtp-cell/mcp-for-blender/pull/2), [#3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3). Base/head nối tiếp đúng kế hoạch, chưa merge. Quyền repository hiện có đủ tạo PR dù `/user` ban đầu bị từ chối. Các gate bên ngoài chưa thay đổi trạng thái.
+
+### Kết quả xác minh sau review PR-1
+
+- PR-1 commit `16a2337`: **492 passed, 1 skipped** local; GitHub Actions **success** cho chính SHA này: https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224302 (push) và https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224280 (pull_request).
+- Đã đưa bản sửa vào các nhánh phụ thuộc bằng merge thông thường, không force-push và không merge vào `main`: PR-2 **521 passed, 1 skipped**; PR-3 frozen install + toàn suite **541 passed, 1 skipped** (47.06s).
+- Cấu hình auth/allowlist Host-Origin ở PR-2/3 được giữ nguyên; sáu test concurrency mới ở các nhánh này chạy trong local-test có chủ đích. Gate Cloudflare/Windows/web AI thật vẫn chưa nghiệm thu.
