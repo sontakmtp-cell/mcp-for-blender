@@ -229,6 +229,8 @@ if mode == "image":
     src = bpy.data.images.get(ref)
     temp = []  # images this look created, removed at the end
     if src is None:
+        if not ARGS.get("allow_disk_images", True):
+            return {"error": "Read-only remote look only accepts existing Blender image datablocks; local image files are not allowed."}
         path = bpy.path.abspath(ref)
         if not os.path.isfile(path):
             return {"error": f"No image named {ref!r} in the file and no file at {path!r}"}

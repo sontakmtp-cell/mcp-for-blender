@@ -95,12 +95,12 @@ def slow_http(tmp_path):
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
         log = (tmp_path / 'http.log').open('w+')
-        env = {'DISABLE_TELEMETRY': 'true', 'XDG_CONFIG_HOME': str(tmp_path), 'XDG_CACHE_HOME': str(tmp_path)}
+        env = {'GOODMCP_ALLOW_WRITE': '1', 'DISABLE_TELEMETRY': 'true', 'XDG_CONFIG_HOME': str(tmp_path), 'XDG_CACHE_HOME': str(tmp_path)}
         if 'SYSTEMROOT' in os.environ:
             env['SYSTEMROOT'] = os.environ['SYSTEMROOT']
         process = subprocess.Popen([sys.executable, '-c',
             f'from blender_mcp import server; server.REMOTE_RESPONSE_TIMEOUT={timeout}; server.main()',
-            '--transport', 'streamable-http', '--http-port', str(port), '--port', str(addon.port)],
+            '--transport', 'streamable-http', '--local-test', '--http-port', str(port), '--port', str(addon.port)],
             stdout=log, stderr=log, env=env)
         processes.append(process)
         url = f'http://127.0.0.1:{port}/mcp'

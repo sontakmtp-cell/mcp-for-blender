@@ -31,6 +31,7 @@ def http_server(tmp_path, remote_env):
     proc = subprocess.Popen([
         sys.executable, "-c", "from blender_mcp.server import main; main()",
         "--transport", "streamable-http", "--http-port", str(port), "--port", "1",
+        "--local-test",
     ], env=remote_env, stdout=log, stderr=log)
     try:
         for _ in range(100):
@@ -56,13 +57,20 @@ def http_server(tmp_path, remote_env):
         log.close()
 
 
-async def exercise(read, write):
+async def exercise(read, write, remote=False):
     async with ClientSession(read, write) as session:
         initialized = await session.initialize()
         assert initialized.serverInfo.name == "MCP for Blender"
         tools = await session.list_tools()
         names = {t.name for t in tools.tools}
-        assert {"get_addon_status", "get_scene_info", "look", "execute_blender_code"} <= names
+        assert {"get_addon_status", "get_scene_info", "look"} <= names
+        if remote:
+            assert names == {"get_addon_status", "get_scene_info", "look"}
+            denied = await session.call_tool("execute_blender_code", {"code": "print('MUST_NOT_RUN')"})
+            assert denied.isError
+            assert "not allowed" in denied.content[0].text
+        else:
+            assert "execute_blender_code" in names
         # The process is intentionally pointed at a closed loopback port.
         result = await session.call_tool("get_scene_info", {})
         assert "Error getting scene info" in result.content[0].text
@@ -74,7 +82,7 @@ def test_streamable_http_real_protocol_and_blender_offline(http_server):
         async with asyncio.timeout(15):
             async with httpx.AsyncClient(trust_env=False) as client:
                 async with streamable_http_client(http_server, http_client=client) as (read, write, _):
-                    await exercise(read, write)
+                    await exercise(read, write, remote=True)
     asyncio.run(run())
 
 
