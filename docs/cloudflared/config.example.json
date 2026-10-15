@@ -1,0 +1,8 @@
+{
+  "tunnel": "REPLACE-WITH-TUNNEL-UUID",
+  "credentials-file": "C:/Users/YOUR-NAME/.cloudflared/REPLACE-WITH-TUNNEL-UUID.json",
+  "ingress": [
+    {"hostname": "goodmcp.si", "service": "http://127.0.0.1:8765"},
+    {"service": "http_status:404"}
+  ]
+}

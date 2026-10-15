@@ -40,3 +40,46 @@ Kết quả toàn suite sau PR-1: **486 passed, 1 skipped** (39.88s). Skip có s
 - **Chưa nghiệm thu Cloudflare thật:** không có công cụ/account Cloudflare trong phiên này; Managed OAuth, email Allow policy, HTTPS, thu hồi phiên và RFC 8707 theo từng web client chưa được kiểm chứng. Không tự viết OAuth fallback khi chưa có lỗi tương thích thực tế.
 
 PR-2 toàn suite: **514 passed, 1 skipped** (41.49s); sau đó thêm test tích hợp JWT→MCP→policy, toàn file auth **25 passed** (1.46s). Blender thật qua local-test: 7 tools ở write mode; status/scene/image/write/save/concurrency đều đạt. Đây không phải JWT Cloudflare thật.
+
+## PR-3 — Ticket D/F và phần chuẩn bị Ticket E
+
+- Máy đích do chủ sở hữu xác nhận: **Windows**. Mã được chạy/test tại Linux; không đánh tráo kết quả này thành đã chạy trên desktop Windows.
+- Có `scripts/start-goodmcp.ps1`, `scripts/check-goodmcp.ps1`, `.env.example`, named-Tunnel config mẫu và README tiếng Việt. Start giữ cửa sổ mở; Ctrl+C dừng các tiến trình của chính nó, không đóng Blender. Không thêm service/dashboard/database.
+- Cấu hình Tunnel phải đúng UUID + credentials path, duy nhất hostname đã chọn → `http://127.0.0.1:8765` + catch-all 404. Test chặn mọi route tới 9876, thêm hostname bypass và config sai kiểu.
+- Start kiểm tra Blender trước; từ chối local-test kết hợp Tunnel; bắt buộc public Managed OAuth challenge trước chạy cloudflared. Check phân biệt addon/origin auth/public challenge. Test mô phỏng Tunnel chết, cleanup origin và startup thất bại.
+- Kiểm tra log thực phát hiện uvicorn mặc định re-enable logger đã disable: truyền `log_config=None` để giữ tắt log raw Python. Đây là hiệu chỉnh sau PR-2, không coi thuộc tính logger trước startup là bằng chứng đủ.
+- PowerShell **7.6.7** portable chính thức được xác minh SHA256 theo asset `hashes.sha256`, chạy trên Linux: cả hai script parse được; thử wrapper bằng fake `uv` xác minh cwd từ `/tmp`, argv chính xác và giữ exit code 17. Chưa thử PowerShell 5.1/desktop Windows thật.
+- Kiểm tra socket thực: HTTP **127.0.0.1:8765**, addon **127.0.0.1:9876**; không có bind `0.0.0.0` ở hai cổng.
+
+### Nghiệm thu bên ngoài còn chặn
+
+| Client | Protocol works | Account/region eligible | Read/write usable | Quan sát |
+|---|---|---|---|---|
+| MCP Python SDK 1.29.0 | Đạt local, protocol 2025-11-25 | Không áp dụng | Đạt trên scene thử | status, scene, ảnh, execute/save, concurrency |
+| MCP Inspector | Xem transcript local bên dưới | Không áp dụng | Xem transcript | Không đại diện web-client acceptance |
+| Grok Web | Chưa thử | Chưa xác minh | Chưa thử | Không có phiên đăng nhập/browser hoặc connector tài khoản |
+| ChatGPT Web | Chưa thử | Chưa xác minh gói/workspace | Chưa thử | Không suy ra quyền write từ Inspector |
+| Gemini Web | Chưa thử | Chưa xác minh khu vực/tài khoản | Chưa thử | Không suy ra eligibility từ timezone; không thay bằng Gemini API |
+
+Cloudflare Access policy, Managed OAuth, DNS và named Tunnel **chưa được tạo/đổi** vì phiên không có công cụ truy cập Cloudflare. Chưa biết apex đang dùng dịch vụ nào; README yêu cầu kiểm tra trước khi chọn apex/subdomain. HTTPS thật, owner login, người lạ bị chặn ở edge, revoke/refresh, Tunnel mất mạng, restart Windows và khôi phục Blender cần thử trên máy/chủ tài khoản thực. Không có bằng chứng cho phép đánh dấu các gate này đạt.
+
+### Transcript local — Inspector và vận hành
+
+MCP Inspector CLI **1.0.2** (nhánh v1 dành cho SDK upstream 1.x); local test, không OAuth thật:
+
+```text
+Readonly tools/list: get_addon_status, get_scene_info, look
+Direct execute_blender_code in readonly: isError=true, Tool is not allowed by the GoodMCP remote policy
+Inspector 1.0.2 Streamable HTTP: tools/list PASS (7 write-mode tools)
+Inspector get_scene_info PASS
+Inspector look PASS (image returned)
+Inspector write/material/save PASS (disposable file)
+Remote log payload suppression PASS
+Operator start/SIGINT cleanup PASS; Blender stays running
+```
+
+Write test dùng `bpy` tạo `GoodMCP_Inspector_Test`, vật liệu Principled màu đỏ, lưu `/workspace/.cloud-blender/artifacts/inspector-test.blend`. File và backup chỉ là generated artifacts ngoài Git. Không dùng scene cá nhân. Test log xác minh chuỗi riêng trong mã Python không xuất hiện sau khi uvicorn khởi động thật; regression tự động dùng fake addon TCP để kiểm tra lại điều này qua HTTP.
+
+Bộ kiểm tra tự động còn xác minh request >1 MiB nhận 413, Host lạ nhận 421, malformed Tunnel config bị từ chối. Diff addon gốc/bundled rỗng; mọi package dependency, version và artifact checksum ngoài metadata package gốc giữ nguyên baseline.
+
+Kết quả cuối PR-3: **535 passed, 1 skipped** (42.28s), `git diff --check` đạt. Skip có sẵn từ baseline, không vô hiệu test. Toàn bộ mã mới có regression tests; thay đổi addon bằng 0. HTTP local-test đã dừng sau nghiệm thu; Blender thử vẫn ở loopback. Chưa mở public endpoint hoặc merge bất kỳ nhánh nào vào main.

@@ -20,7 +20,9 @@ local_tests/
 
 supabase/
 
-scripts/
+scripts/*
+!scripts/start-goodmcp.ps1
+!scripts/check-goodmcp.ps1
 
 # Legacy PyPI shim — built and published separately, see runbook
 legacy-shim/
@@ -34,6 +36,8 @@ supabase/.temp/
 *.pem
 *.key
 .secrets/
+.goodmcp/
+.cloudflared/
 
 # Local eval harness (see evals/README.md)
 evals/

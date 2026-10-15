@@ -170,3 +170,6 @@ def test_remote_forces_safe_mode_and_disables_sensitive_logs(monkeypatch):
     assert logger.disabled
     assert run.call_args.kwargs["proxy_headers"] is False
     assert run.call_args.kwargs["access_log"] is False
+    # Uvicorn's default dictConfig re-enables disabled loggers, including the
+    # upstream logger that logs Python payloads.
+    assert run.call_args.kwargs["log_config"] is None
