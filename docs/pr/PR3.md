@@ -6,4 +6,4 @@ Validation includes operator safety/cleanup tests, complete regression suite, re
 
 Blocked external acceptance: Cloudflare account configuration and public HTTPS, real owner/non-owner authentication and revocation, Windows desktop startup/restart, and Grok/ChatGPT/Gemini account-specific flows. No public Tunnel or DNS change was made.
 
-Final regression result: 535 passed, 1 pre-existing skip (42.28s). All dependency artifacts/checksums outside root package metadata and both addon copies are unchanged from baseline.
+Earlier local regression result: 535 passed, 1 pre-existing skip (42.28s). The latest verified GitHub Actions run [38697398048](https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697398048) at commit `3bf5822` reports **559 passed, 1 skipped (50.32s)**. All dependency artifacts/checksums outside root package metadata and both addon copies are unchanged from baseline. Native Windows and real Cloudflare/web-client acceptance are still pending.
