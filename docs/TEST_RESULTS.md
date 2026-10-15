@@ -109,16 +109,16 @@ Write test dùng `bpy` tạo `GoodMCP_Inspector_Test`, vật liệu Principled m
 
 Bộ kiểm tra tự động còn xác minh request >1 MiB nhận 413, Host lạ nhận 421, malformed Tunnel config bị từ chối. Diff addon gốc/bundled rỗng; mọi package dependency, version và artifact checksum ngoài metadata package gốc giữ nguyên baseline.
 
-Kết quả cuối PR-3: **535 passed, 1 skipped** (42.28s), `git diff --check` đạt. Skip có sẵn từ baseline, không vô hiệu test. Toàn bộ mã mới có regression tests; thay đổi addon bằng 0. HTTP local-test đã dừng sau nghiệm thu; Blender thử vẫn ở loopback. Chưa mở public endpoint hoặc merge bất kỳ nhánh nào vào main.
+Kết quả PR-3 giai đoạn nghiệm thu local: **535 passed, 1 skipped** (42.28s), `git diff --check` đạt. Sau các test bổ sung, GitHub Actions tại SHA `3bf5822` xác nhận **559 passed, 1 skipped** (50.32s): https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697398048. Các số trước là mốc lịch sử, không phải kết quả CI mới nhất. Skip có sẵn từ baseline; thay đổi addon bằng 0. HTTP local-test đã dừng; Blender thử vẫn ở loopback. Chưa mở public endpoint. PR1 đã vào `main`, PR2 đã được đưa vào `main` qua PR4; PR3 vẫn Draft và chưa merge.
 
 ### Trạng thái review
 
-Đã mở và xác minh ba Draft PR: [#1](https://github.com/sontakmtp-cell/mcp-for-blender/pull/1), [#2](https://github.com/sontakmtp-cell/mcp-for-blender/pull/2), [#3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3). Base/head nối tiếp đúng kế hoạch, chưa merge. Quyền repository hiện có đủ tạo PR dù `/user` ban đầu bị từ chối. Các gate bên ngoài chưa thay đổi trạng thái.
+**Tình trạng ngày 2026-10-15:** [PR1](https://github.com/sontakmtp-cell/mcp-for-blender/pull/1) merged vào `main`; [PR2](https://github.com/sontakmtp-cell/mcp-for-blender/pull/2) ban đầu merged vào nhánh phụ, sau đó được đưa vào `main` bằng [PR4](https://github.com/sontakmtp-cell/mcp-for-blender/pull/4), merge SHA `6b429b0`. [PR3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3) đã đổi base về `main`, vẫn OPEN/Draft; diff so với `main` hiện còn 17 file riêng của PR3. Chưa nghiệm thu các gate Cloudflare/Windows/web AI.
 
 ### Kết quả xác minh sau review PR-1
 
 - PR-1 commit `16a2337`: **492 passed, 1 skipped** local; GitHub Actions **success** cho chính SHA này: https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224302 (push) và https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224280 (pull_request).
-- Đã đưa bản sửa vào các nhánh phụ thuộc bằng merge thông thường, không force-push và không merge vào `main`: PR-2 **521 passed, 1 skipped**; PR-3 frozen install + toàn suite **541 passed, 1 skipped** (47.06s).
+- **Tại thời điểm kiểm thử lịch sử này (trước khi hợp nhất về main):** đã đưa bản sửa vào các nhánh phụ thuộc bằng merge thông thường, không force-push: PR-2 **521 passed, 1 skipped**; PR-3 frozen install + toàn suite **541 passed, 1 skipped** (47.06s). Trạng thái merge hiện tại được ghi ở mục trên.
 - Cấu hình auth/allowlist Host-Origin ở PR-2/3 được giữ nguyên; sáu test concurrency mới ở các nhánh này chạy trong local-test có chủ đích. Gate Cloudflare/Windows/web AI thật vẫn chưa nghiệm thu.
 
 ## PR-2 — sửa review bảo mật P1/P2 (2026-10-15)
@@ -151,4 +151,10 @@ Real stdio private test-file image access unchanged: PASS
 - PR-2 `bcc61dd`: **539 passed, 1 skipped**; GitHub Actions **SUCCESS** cho đúng SHA: https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697066804 và https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697061180.
 - Các file của fix: `src/blender_mcp/remote_policy.py`, `src/blender_mcp/server.py`, `src/blender_mcp/blender_scripts.py`, `tests/test_remote_image_policy.py`, `.env.example`, `docs/TEST_RESULTS.md`.
 - Lệnh chính: `.venv/bin/python -m compileall -q src/blender_mcp/remote_policy.py src/blender_mcp/server.py src/blender_mcp/blender_scripts.py`; `.venv/bin/python -m pytest tests/test_access_auth.py tests/test_remote_image_policy.py tests/test_consolidated_tools.py tests/test_remote_protocol.py -q`; `DISABLE_TELEMETRY=true .venv/bin/python -m pytest -q`; `git diff --check`.
-- Đã merge bản sửa vào nhánh PR-3, giữ cấu hình startup/auth/logging hiện có. Frozen install + toàn suite trên nhánh kết hợp: **559 passed, 1 skipped** (53.05s). README bổ sung phạm vi ảnh/resources; không merge PR nào vào `main`.
+- Đã merge bản sửa vào nhánh PR-3, giữ cấu hình startup/auth/logging hiện có. Frozen install + toàn suite trên nhánh kết hợp: **559 passed, 1 skipped** (53.05s). README bổ sung phạm vi ảnh/resources. Lúc ghi kết quả này các PR chưa về `main`; nay PR1 và PR2 đã tích hợp, PR3 vẫn chờ.
+
+### Kiểm tra tích hợp sau review PR-3
+
+- PR4 (mang riêng 15 file PR2 vào `main`) đã merge thành công ở commit `6b429b0477f1a3bd143b00b2bb8391f90f5e92f4`; CI cho [PR tích hợp](https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38698925556) báo **success** trước merge.
+- PR3 hiện base là `main`, chỉ còn 17 file khác biệt phục vụ vận hành Windows và tài liệu. Việc đổi base và cập nhật tài liệu kích hoạt kiểm tra GitHub Actions mới; kết quả từng lần kiểm tra cần xem ở tab **Checks** của [PR3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3).
+- Đây là xác minh tích hợp source code. Chưa có Cloudflare Tunnel public, Windows thực tế hoặc web-client E2E; không coi pass CI là nghiệm thu dịch vụ trực tuyến.
