@@ -68,6 +68,59 @@ Hostname public vẫn thuộc PR-2/3: allowlist Host/Origin dựa trên `GOODMCP
 
 PR-2 toàn suite: **514 passed, 1 skipped** (41.49s); sau đó thêm test tích hợp JWT→MCP→policy, toàn file auth **25 passed** (1.46s). Blender thật qua local-test: 7 tools ở write mode; status/scene/image/write/save/concurrency đều đạt. Đây không phải JWT Cloudflare thật.
 
+## PR-3 — Ticket D/F và phần chuẩn bị Ticket E
+
+- Máy đích do chủ sở hữu xác nhận: **Windows**. Mã được chạy/test tại Linux; không đánh tráo kết quả này thành đã chạy trên desktop Windows.
+- Có `scripts/start-goodmcp.ps1`, `scripts/check-goodmcp.ps1`, `.env.example`, named-Tunnel config mẫu và README tiếng Việt. Start giữ cửa sổ mở; Ctrl+C dừng các tiến trình của chính nó, không đóng Blender. Không thêm service/dashboard/database.
+- Cấu hình Tunnel phải đúng UUID + credentials path, duy nhất hostname đã chọn → `http://127.0.0.1:8765` + catch-all 404. Test chặn mọi route tới 9876, thêm hostname bypass và config sai kiểu.
+- Start kiểm tra Blender trước; từ chối local-test kết hợp Tunnel; bắt buộc public Managed OAuth challenge trước chạy cloudflared. Check phân biệt addon/origin auth/public challenge. Test mô phỏng Tunnel chết, cleanup origin và startup thất bại.
+- Kiểm tra log thực phát hiện uvicorn mặc định re-enable logger đã disable: truyền `log_config=None` để giữ tắt log raw Python. Đây là hiệu chỉnh sau PR-2, không coi thuộc tính logger trước startup là bằng chứng đủ.
+- PowerShell **7.6.7** portable chính thức được xác minh SHA256 theo asset `hashes.sha256`, chạy trên Linux: cả hai script parse được; thử wrapper bằng fake `uv` xác minh cwd từ `/tmp`, argv chính xác và giữ exit code 17. Chưa thử PowerShell 5.1/desktop Windows thật.
+- Kiểm tra socket thực: HTTP **127.0.0.1:8765**, addon **127.0.0.1:9876**; không có bind `0.0.0.0` ở hai cổng.
+
+### Nghiệm thu bên ngoài còn chặn
+
+| Client | Protocol works | Account/region eligible | Read/write usable | Quan sát |
+|---|---|---|---|---|
+| MCP Python SDK 1.29.0 | Đạt local, protocol 2025-11-25 | Không áp dụng | Đạt trên scene thử | status, scene, ảnh, execute/save, concurrency |
+| MCP Inspector | Xem transcript local bên dưới | Không áp dụng | Xem transcript | Không đại diện web-client acceptance |
+| Grok Web | Chưa thử | Chưa xác minh | Chưa thử | Không có phiên đăng nhập/browser hoặc connector tài khoản |
+| ChatGPT Web | Chưa thử | Chưa xác minh gói/workspace | Chưa thử | Không suy ra quyền write từ Inspector |
+| Gemini Web | Chưa thử | Chưa xác minh khu vực/tài khoản | Chưa thử | Không suy ra eligibility từ timezone; không thay bằng Gemini API |
+
+Cloudflare Access policy, Managed OAuth, DNS và named Tunnel **chưa được tạo/đổi** vì phiên không có công cụ truy cập Cloudflare. Chưa biết apex đang dùng dịch vụ nào; README yêu cầu kiểm tra trước khi chọn apex/subdomain. HTTPS thật, owner login, người lạ bị chặn ở edge, revoke/refresh, Tunnel mất mạng, restart Windows và khôi phục Blender cần thử trên máy/chủ tài khoản thực. Không có bằng chứng cho phép đánh dấu các gate này đạt.
+
+### Transcript local — Inspector và vận hành
+
+MCP Inspector CLI **1.0.2** (nhánh v1 dành cho SDK upstream 1.x); local test, không OAuth thật:
+
+```text
+Readonly tools/list: get_addon_status, get_scene_info, look
+Direct execute_blender_code in readonly: isError=true, Tool is not allowed by the GoodMCP remote policy
+Inspector 1.0.2 Streamable HTTP: tools/list PASS (7 write-mode tools)
+Inspector get_scene_info PASS
+Inspector look PASS (image returned)
+Inspector write/material/save PASS (disposable file)
+Remote log payload suppression PASS
+Operator start/SIGINT cleanup PASS; Blender stays running
+```
+
+Write test dùng `bpy` tạo `GoodMCP_Inspector_Test`, vật liệu Principled màu đỏ, lưu `/workspace/.cloud-blender/artifacts/inspector-test.blend`. File và backup chỉ là generated artifacts ngoài Git. Không dùng scene cá nhân. Test log xác minh chuỗi riêng trong mã Python không xuất hiện sau khi uvicorn khởi động thật; regression tự động dùng fake addon TCP để kiểm tra lại điều này qua HTTP.
+
+Bộ kiểm tra tự động còn xác minh request >1 MiB nhận 413, Host lạ nhận 421, malformed Tunnel config bị từ chối. Diff addon gốc/bundled rỗng; mọi package dependency, version và artifact checksum ngoài metadata package gốc giữ nguyên baseline.
+
+Kết quả PR-3 giai đoạn nghiệm thu local: **535 passed, 1 skipped** (42.28s), `git diff --check` đạt. Sau các test bổ sung, GitHub Actions tại SHA `3bf5822` xác nhận **559 passed, 1 skipped** (50.32s): https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697398048. Các số trước là mốc lịch sử, không phải kết quả CI mới nhất. Skip có sẵn từ baseline; thay đổi addon bằng 0. HTTP local-test đã dừng; Blender thử vẫn ở loopback. Chưa mở public endpoint. PR1 đã vào `main`, PR2 đã được đưa vào `main` qua PR4; PR3 vẫn Draft và chưa merge.
+
+### Trạng thái review
+
+**Tình trạng ngày 2026-10-15:** [PR1](https://github.com/sontakmtp-cell/mcp-for-blender/pull/1) merged vào `main`; [PR2](https://github.com/sontakmtp-cell/mcp-for-blender/pull/2) ban đầu merged vào nhánh phụ, sau đó được đưa vào `main` bằng [PR4](https://github.com/sontakmtp-cell/mcp-for-blender/pull/4), merge SHA `6b429b0`. [PR3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3) đã đổi base về `main`, vẫn OPEN/Draft; diff so với `main` hiện còn 17 file riêng của PR3. Chưa nghiệm thu các gate Cloudflare/Windows/web AI.
+
+### Kết quả xác minh sau review PR-1
+
+- PR-1 commit `16a2337`: **492 passed, 1 skipped** local; GitHub Actions **success** cho chính SHA này: https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224302 (push) và https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224280 (pull_request).
+- **Tại thời điểm kiểm thử lịch sử này (trước khi hợp nhất về main):** đã đưa bản sửa vào các nhánh phụ thuộc bằng merge thông thường, không force-push: PR-2 **521 passed, 1 skipped**; PR-3 frozen install + toàn suite **541 passed, 1 skipped** (47.06s). Trạng thái merge hiện tại được ghi ở mục trên.
+- Cấu hình auth/allowlist Host-Origin ở PR-2/3 được giữ nguyên; sáu test concurrency mới ở các nhánh này chạy trong local-test có chủ đích. Gate Cloudflare/Windows/web AI thật vẫn chưa nghiệm thu.
+
 ## PR-2 — sửa review bảo mật P1/P2 (2026-10-15)
 
 Review: https://github.com/sontakmtp-cell/mcp-for-blender/pull/2#pullrequestreview-5529290530
@@ -92,3 +145,16 @@ Real stdio private test-file image access unchanged: PASS
 ```
 
 `Render Result` được tạo bằng render thử 64x64 trên scene thử và khôi phục engine/resolution sau khi chuẩn bị. HTTP test chỉ dùng loopback, không có Tunnel. Gate triển khai Cloudflare/Windows/web AI thật vẫn chưa được nghiệm thu; kết quả này không xác nhận end-to-end OAuth.
+
+### Kết quả CI và nhánh phụ thuộc sau review PR-2
+
+- PR-2 `bcc61dd`: **539 passed, 1 skipped**; GitHub Actions **SUCCESS** cho đúng SHA: https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697066804 và https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38697061180.
+- Các file của fix: `src/blender_mcp/remote_policy.py`, `src/blender_mcp/server.py`, `src/blender_mcp/blender_scripts.py`, `tests/test_remote_image_policy.py`, `.env.example`, `docs/TEST_RESULTS.md`.
+- Lệnh chính: `.venv/bin/python -m compileall -q src/blender_mcp/remote_policy.py src/blender_mcp/server.py src/blender_mcp/blender_scripts.py`; `.venv/bin/python -m pytest tests/test_access_auth.py tests/test_remote_image_policy.py tests/test_consolidated_tools.py tests/test_remote_protocol.py -q`; `DISABLE_TELEMETRY=true .venv/bin/python -m pytest -q`; `git diff --check`.
+- Đã merge bản sửa vào nhánh PR-3, giữ cấu hình startup/auth/logging hiện có. Frozen install + toàn suite trên nhánh kết hợp: **559 passed, 1 skipped** (53.05s). README bổ sung phạm vi ảnh/resources. Lúc ghi kết quả này các PR chưa về `main`; nay PR1 và PR2 đã tích hợp, PR3 vẫn chờ.
+
+### Kiểm tra tích hợp sau review PR-3
+
+- PR4 (mang riêng 15 file PR2 vào `main`) đã merge thành công ở commit `6b429b0477f1a3bd143b00b2bb8391f90f5e92f4`; CI cho [PR tích hợp](https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38698925556) báo **success** trước merge.
+- PR3 hiện base là `main`, chỉ còn 17 file khác biệt phục vụ vận hành Windows và tài liệu. Việc đổi base và cập nhật tài liệu kích hoạt kiểm tra GitHub Actions mới; kết quả từng lần kiểm tra cần xem ở tab **Checks** của [PR3](https://github.com/sontakmtp-cell/mcp-for-blender/pull/3).
+- Đây là xác minh tích hợp source code. Chưa có Cloudflare Tunnel public, Windows thực tế hoặc web-client E2E; không coi pass CI là nghiệm thu dịch vụ trực tuyến.

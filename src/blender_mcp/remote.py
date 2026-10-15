@@ -82,4 +82,4 @@ def run_http(mcp, args):
     app = AccessMiddleware(process_http_app(mcp),
         verifier=AccessVerifier(config) if config else None, local_test=args.local_test)
     uvicorn.run(app, host="127.0.0.1", port=args.http_port,
-                proxy_headers=False, access_log=False, log_level="warning")
+                proxy_headers=False, access_log=False, log_level="warning", log_config=None)
