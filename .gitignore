@@ -28,6 +28,7 @@ legacy-shim/
 # Secrets: Premium keys live only as Edge Function secrets
 .env
 .env.*
+!.env.example
 supabase/.env
 supabase/.temp/
 *.pem

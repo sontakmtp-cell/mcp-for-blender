@@ -100,3 +100,73 @@ def test_remote_connection_has_bounded_connect_timeout(monkeypatch):
     conn = server.BlenderConnection("127.0.0.1", 1)
     assert conn.connect()
     sock.settimeout.assert_called_with(5.0)
+
+
+def test_stateless_requests_do_not_close_process_lifespan():
+    from contextlib import asynccontextmanager
+    from mcp.server.fastmcp import FastMCP
+    from starlette.testclient import TestClient
+    from blender_mcp.remote import process_http_app
+    events = []
+
+    @asynccontextmanager
+    async def lifespan(_):
+        events.append("start")
+        yield {}
+        events.append("stop")
+
+    mcp = FastMCP("test", lifespan=lifespan)
+    args, _ = parse_transport_args([])
+    configure_http(mcp, args)
+    with TestClient(process_http_app(mcp), base_url="http://127.0.0.1:8765") as client:
+        for _ in range(2):
+            client.get("/mcp")
+            assert events == ["start"]
+    assert events == ["start", "stop"]
+
+
+def test_remote_response_size_and_timeout_are_bounded(monkeypatch):
+    import socket
+    monkeypatch.setattr(server, "REMOTE_MODE", True)
+    monkeypatch.setattr(server, "REMOTE_RESPONSE_LIMIT", 8)
+    sock = Mock()
+    sock.recv.return_value = b"123456789"
+    conn = server.BlenderConnection("127.0.0.1", 9876, sock=sock)
+    with pytest.raises(ValueError, match="32 MiB"):
+        conn.receive_full_response(sock)
+    sock.recv.side_effect = socket.timeout()
+    with pytest.raises(socket.timeout):
+        conn.receive_full_response(sock)
+
+
+def test_remote_requires_config_unless_explicit_local_test(monkeypatch):
+    from blender_mcp.remote import run_http
+    for name in ("GOODMCP_ACCESS_TEAM_DOMAIN", "GOODMCP_ACCESS_AUD", "GOODMCP_ALLOWED_EMAIL", "GOODMCP_PUBLIC_URL"):
+        monkeypatch.delenv(name, raising=False)
+    args, _ = parse_transport_args(["--transport", "streamable-http"])
+    with pytest.raises(ValueError, match="TEAM_DOMAIN"):
+        run_http(server.mcp, args)
+
+
+def test_remote_forces_safe_mode_and_disables_sensitive_logs(monkeypatch):
+    from mcp.server.fastmcp import FastMCP
+    from blender_mcp.remote import run_http
+    import uvicorn
+    import logging
+    monkeypatch.setattr(server, "CLI_HOST", "127.0.0.1")
+    logger = logging.getLogger("BlenderMCPServer")
+    monkeypatch.setattr(logger, "disabled", False)
+    monkeypatch.setenv("BLENDER_MCP_SAFE_MODE", "0")
+    monkeypatch.setenv("DISABLE_TELEMETRY", "false")
+    monkeypatch.setenv("BLENDER_MCP_CONTEXT_LOG", "1")
+    run = Mock()
+    monkeypatch.setattr(uvicorn, "run", run)
+    args, _ = parse_transport_args(["--transport", "streamable-http", "--local-test"])
+    run_http(FastMCP("test"), args)
+    import os
+    assert os.environ["BLENDER_MCP_SAFE_MODE"] == "1"
+    assert os.environ["DISABLE_TELEMETRY"] == "true"
+    assert os.environ["BLENDER_MCP_CONTEXT_LOG"] == "0"
+    assert logger.disabled
+    assert run.call_args.kwargs["proxy_headers"] is False
+    assert run.call_args.kwargs["access_log"] is False

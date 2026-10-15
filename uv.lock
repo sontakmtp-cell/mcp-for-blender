@@ -360,12 +360,13 @@ wheels = [
 
 [[package]]
 name = "mcp-for-blender"
-version = "2.1.8"
+version = "2.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
     { name = "httpx" },
     { name = "mcp" },
+    { name = "pyjwt", extra = ["crypto"] },
 ]
 
 [package.metadata]
@@ -373,6 +374,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "mcp", specifier = ">=1.26.0,<2" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
 ]
 
 [[package]]
