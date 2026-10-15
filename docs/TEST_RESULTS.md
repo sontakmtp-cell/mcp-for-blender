@@ -27,3 +27,30 @@ DISABLE_TELEMETRY=true .venv/bin/python -m pytest -q
 Dừng GoodMCP/cloudflared trước. Dùng stdio như cũ (`mcp-for-blender`, không có `--transport`). Để quay lại mã cũ, lưu thay đổi cá nhân, checkout SHA baseline ở trên, `uv sync --frozen`. Không reset/xóa file `.blend`; mở lại bản backup thử khi cần. Addon không bị thay đổi.
 
 Kết quả toàn suite sau PR-1: **486 passed, 1 skipped** (39.88s). Skip có sẵn được giữ nguyên.
+
+## PR-1 — sửa review P1/P2 (2026-10-15)
+
+Review: https://github.com/sontakmtp-cell/mcp-for-blender/pull/1#pullrequestreview-5529087100
+
+- Tái hiện trên bản gốc `f1cd848`: test HTTP thật khởi chạy tool socket chậm và gửi `tools/list` độc lập thất bại bằng **TimeoutError** (1 failed, 4 deselected). Không dùng test hai Python thread thay cho kiểm thử event loop.
+- Chuyển I/O đồng bộ trong async tools, callback generation/telemetry/consent sang AnyIO worker; session/progress/elicitation vẫn chạy trên event loop ban đầu. Tool/resource sync được đăng ký bằng async adapter, giữ API sync dùng nội bộ và schemas cũ.
+- Giữ send/receive lock trong worker. Khi client hủy request, worker không bị abandon giữa phản hồi: drain response rồi mới nhả lock. Không tự retry lệnh ghi. Timeout đóng socket cũ và lệnh kế tiếp kết nối mới. Không hứa rollback lệnh Blender đã gửi khi hủy request.
+- Lifecycle Blender chạy một lần ở process scope, không đóng socket sau từng request HTTP stateless. Shutdown chờ exchange đang chạy trước khi đóng. Mỗi screenshot dùng tên file riêng để request đồng thời không đè/xóa ảnh nhau.
+- Sáu regression mới: ba tool chậm (`get_scene_info`, `execute_blender_code`, `look`) vẫn cho HTTP `tools/list` trả trong 0.8s; cancel rồi gọi tiếp không lẫn response; timeout/reconnect không replay write; hai capture có file/kết quả riêng. Timeout test rút ngân sách socket xuống 0.2s chỉ trong subprocess test, production vẫn 180s.
+- Frozen install rồi toàn suite: **492 passed, 1 skipped** (43.63s). Dependency artifacts/checksums giữ nguyên; thêm AnyIO vào khai báo trực tiếp, không nâng phiên bản.
+- Thêm GitHub Actions chạy frozen install + toàn suite cho PR/push, pin SHA action từ repository chính thức. Chưa coi workflow đạt trước khi GitHub trả kết quả.
+
+### Inspector chạy trực tiếp trên nhánh PR-1 sau sửa
+
+Dùng Inspector CLI **1.0.2**, `--transport http`, URL local `/mcp`; server chỉ bind loopback. CLI tự initialize trước discovery/call:
+
+```text
+Inspector 1.0.2 initialize/tools-list: PASS (9 tools, no Apps)
+Inspector get_scene_info: PASS
+Inspector look: PASS (image)
+Inspector execute_blender_code/create/save disposable scene: PASS
+```
+
+Lệnh: `npx @modelcontextprotocol/inspector@1.0.2 --cli http://127.0.0.1:8765/mcp --transport http --method tools/list`; các call dùng `--method tools/call --tool-name ...`. Scene thử `GoodMCP_PR1_Review` được lưu riêng ngoài Git tại `/workspace/.cloud-blender/artifacts/pr1-review.blend`. Server HTTP đã dừng sau nghiệm thu. Đây là kết quả Inspector local, không phải xác nhận OAuth/web client/Windows.
+
+Hostname public vẫn thuộc PR-2/3: allowlist Host/Origin dựa trên `GOODMCP_PUBLIC_URL`, giữ DNS rebinding protection. Chưa có Tunnel/Access thật để nghiệm thu xuyên Internet.

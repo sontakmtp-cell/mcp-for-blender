@@ -1,5 +1,6 @@
 """Loopback Streamable HTTP adapter; the existing FastMCP owns every tool."""
 import argparse
+from contextlib import asynccontextmanager
 
 
 def parse_transport_args(argv):
@@ -28,6 +29,33 @@ def configure_http(mcp, args):
     )
 
 
+def process_http_app(mcp):
+    """Keep the shared Blender socket alive across stateless HTTP requests.
+
+    SDK 1.29 runs low-level lifespan per request in stateless mode; the
+    upstream lifespan closes the socket, so run it once at ASGI process scope.
+    """
+    original_lifespan = mcp._mcp_server.lifespan
+
+    @asynccontextmanager
+    async def request_lifespan(_):
+        yield {}
+
+    mcp._mcp_server.lifespan = request_lifespan
+    app = mcp.streamable_http_app()
+    sdk_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def process_lifespan(application):
+        async with original_lifespan(mcp._mcp_server):
+            async with sdk_lifespan(application):
+                yield
+
+    app.router.lifespan_context = process_lifespan
+    return app
+
+
 def run_http(mcp, args):
     configure_http(mcp, args)
-    mcp.run(transport="streamable-http")
+    import uvicorn
+    uvicorn.run(process_http_app(mcp), host=args.http_host, port=args.http_port)
