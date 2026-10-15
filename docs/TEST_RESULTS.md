@@ -120,3 +120,28 @@ Kết quả cuối PR-3: **535 passed, 1 skipped** (42.28s), `git diff --check` 
 - PR-1 commit `16a2337`: **492 passed, 1 skipped** local; GitHub Actions **success** cho chính SHA này: https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224302 (push) và https://github.com/sontakmtp-cell/mcp-for-blender/actions/runs/38694224280 (pull_request).
 - Đã đưa bản sửa vào các nhánh phụ thuộc bằng merge thông thường, không force-push và không merge vào `main`: PR-2 **521 passed, 1 skipped**; PR-3 frozen install + toàn suite **541 passed, 1 skipped** (47.06s).
 - Cấu hình auth/allowlist Host-Origin ở PR-2/3 được giữ nguyên; sáu test concurrency mới ở các nhánh này chạy trong local-test có chủ đích. Gate Cloudflare/Windows/web AI thật vẫn chưa nghiệm thu.
+
+## PR-2 — sửa review bảo mật P1/P2 (2026-10-15)
+
+Review: https://github.com/sontakmtp-cell/mcp-for-blender/pull/2#pullrequestreview-5529290530
+
+- **Tái hiện trước sửa:** HTTP `tools/call look(image=<PNG thử ngoài scene>)` trả ảnh từ Blender thật khi `GOODMCP_ALLOW_WRITE=0`. PNG được tạo cho kiểm thử trong thư mục tạm, không dùng ảnh cá nhân.
+- **Boundary sau sửa:** remote dispatch đặt quyền ảnh bằng request-local ContextVar, không phải tham số client. Worker kế thừa quyền này; server ghi đè `allow_disk_images` khi tạo script. Trong Blender, nếu `bpy.data.images.get(name)` không có datablock thì từ chối trước `abspath/isfile/images.load`. Không preflight tách rời, không blacklist ký tự đường dẫn và không fallback từ ảnh bị từ chối sang viewport.
+- Viewport, ảnh trong Blender (kể cả tên có slash/Unicode/giống đường dẫn) và `Render Result` vẫn hoạt động. Ảnh/datablock đã liên kết với Blender thuộc phạm vi cho phép, gồm ảnh file-backed; đây không phải sandbox filesystem của toàn Blender.
+- Stdio giữ hành vi cũ. Remote bật rõ ràng `GOODMCP_ALLOW_WRITE=1` mới có quyền đọc ảnh từ đường dẫn đĩa, ngoài quyền execute/import/generate đã có. `.env.example` ghi rõ quyền này.
+- Resources có allowlist riêng cho cả discovery và dispatch: HTML viewport tĩnh đi kèm và ba template `blender://object/{name}`, `blender://material/{name}`, `blender://collection/{name}`. URI khác không được liệt kê; gọi trực tiếp bị từ chối bằng lỗi -32602. Đây là dữ liệu scene/static UI, không phải file reader tùy ý.
+- `.env.example` có ví dụ export các biến bắt buộc cho PowerShell: CLI PR-2 không tự nạp `.env`; Start script PR-3 có nạp, biến process hiện có được ưu tiên. Không nhúng email chủ sở hữu hay credentials vào Git.
+- Thêm 18 test: HTTP thật qua policy + script LOOK thật với bpy backend tối thiểu trong CI; đường dẫn ảnh tạm bị từ chối ở readonly dù client giả `allow_disk_images=true`, write opt-in được phép; viewport/ảnh datablock/render được giữ; discovery/read resource có positive/negative controls; 11 dạng path/encoding không chạm hàm resolve/load; stdio script mặc định vẫn đọc ảnh đĩa.
+- Import/syntax (`compileall`) và `git diff --check` đạt; focused suite **61 passed**. Toàn suite PR-2: **539 passed, 1 skipped** (50.56s), skip có sẵn. Review độc lập không tìm thấy đường bypass hoặc regression cụ thể trong boundary đã thay đổi.
+
+### Kiểm chứng Blender thật sau sửa
+
+```text
+Real Blender private file: PASS denied readonly (even with forged argument)
+Real Blender viewport/existing datablock/Render Result: PASS
+Real Blender private file: PASS explicit write opt-in
+Real Blender viewport/existing datablock/Render Result: PASS
+Real stdio private test-file image access unchanged: PASS
+```
+
+`Render Result` được tạo bằng render thử 64x64 trên scene thử và khôi phục engine/resolution sau khi chuẩn bị. HTTP test chỉ dùng loopback, không có Tunnel. Gate triển khai Cloudflare/Windows/web AI thật vẫn chưa được nghiệm thu; kết quả này không xác nhận end-to-end OAuth.
